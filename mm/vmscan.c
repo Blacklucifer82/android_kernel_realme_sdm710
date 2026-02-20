@@ -160,6 +160,10 @@ unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
 #define prefetchw_prev_lru_page(_page, _base, _field) do { } while (0)
 #endif
 
+unsigned long sysctl_anon_min_kbytes __read_mostly = CONFIG_ANON_MIN_KBYTES;
+unsigned long sysctl_clean_low_kbytes __read_mostly = CONFIG_CLEAN_LOW_KBYTES;
+unsigned long sysctl_clean_min_kbytes __read_mostly = CONFIG_CLEAN_MIN_KBYTES;
+
 /*
  * From 0 .. 100.  Higher means more swappy.
  */
@@ -2306,6 +2310,8 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 #else
 	prepare_workingset_protection(pgdat, sc);
 
+	prepare_workingset_protection(pgdat, sc);
+
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || mem_cgroup_get_nr_swap_pages(memcg) <= 0) {
 #endif /* CONFIG_OPLUS_MM_HACKS */
@@ -2370,6 +2376,15 @@ static void get_scan_count(struct lruvec *lruvec, struct mem_cgroup *memcg,
 
 	/*
 	Force-scan anon if clean file pages is under vm.clean_low_kbytes
+	 * or vm.clean_min_kbytes.
+	 */
+	if (sc->clean_below_low || sc->clean_below_min) {
+		scan_balance = SCAN_ANON;
+		goto out;
+	}
+
+	/*
+	 * Force-scan anon if clean file pages is under vm.clean_low_kbytes
 	 * or vm.clean_min_kbytes.
 	 */
 	if (sc->clean_below_low || sc->clean_below_min) {
