@@ -50,11 +50,10 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
 	stat->ctime = inode->i_ctime;
 	stat->blksize = i_blocksize(inode);
 	stat->blocks = inode->i_blocks;
-}
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	susfs_generic_fillattr_spoofer(inode, stat);
 #endif
-
+}
 
 EXPORT_SYMBOL(generic_fillattr);
 
@@ -77,18 +76,6 @@ int vfs_getattr_nosec(struct path *path, struct kstat *stat)
 	if (inode->i_op->getattr)
 		return inode->i_op->getattr(path->mnt, path->dentry, stat);
 
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-	{
-		int err = inode->i_op->getattr(path, stat, request_mask,
-					    query_flags);
-		if (!err)
-			susfs_generic_fillattr_spoofer(inode, stat);
-		return err;
-	}
-#else
-		return inode->i_op->getattr(path, stat, request_mask,
-					    query_flags);
-#endif
 	generic_fillattr(inode, stat);
 	return 0;
 }
@@ -120,8 +107,6 @@ int vfs_fstat(unsigned int fd, struct kstat *stat)
 }
 EXPORT_SYMBOL(vfs_fstat);
 
-int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
-		int flag)
 #ifdef CONFIG_KSU_SUSFS
 extern bool __ksu_is_allow_uid_for_current(uid_t uid);
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0)
@@ -131,12 +116,14 @@ extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *fla
 #endif
 #endif
 
+int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+                int flags)
 {
 	struct path path;
 	int error = -EINVAL;
 	unsigned int lookup_flags = 0;
 
-	if ((flag & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
+	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
 		      AT_EMPTY_PATH)) != 0)
 		goto out;
 #ifdef CONFIG_KSU_SUSFS
@@ -151,9 +138,9 @@ extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *fla
 orig_flow:
 #endif
 
-	if (!(flag & AT_SYMLINK_NOFOLLOW))
+	if (!(flags & AT_SYMLINK_NOFOLLOW))
 		lookup_flags |= LOOKUP_FOLLOW;
-	if (flag & AT_EMPTY_PATH)
+	if (flags & AT_EMPTY_PATH)
 		lookup_flags |= LOOKUP_EMPTY;
 retry:
 	error = user_path_at(dfd, filename, lookup_flags, &path);
