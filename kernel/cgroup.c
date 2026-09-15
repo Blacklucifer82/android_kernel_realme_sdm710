@@ -5500,9 +5500,15 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 	cgrp->self.parent = &parent->self;
 	cgrp->root = root;
 	cgrp->level = level;
+	if (cgroup_on_dfl(cgrp)) {
+		ret = psi_cgroup_alloc(cgrp);
+		if (ret)
+			goto out_idr_free;
+	}
+
 	ret = cgroup_bpf_inherit(cgrp);
 	if (ret)
-		goto out_idr_free;
+		goto out_psi_free;
 
 	for (tcgrp = cgrp; tcgrp; tcgrp = cgroup_parent(tcgrp))
 		cgrp->ancestor_ids[tcgrp->level] = tcgrp->id;
@@ -5533,16 +5539,13 @@ static struct cgroup *cgroup_create(struct cgroup *parent)
 	if (!cgroup_on_dfl(cgrp))
 		cgrp->subtree_control = cgroup_control(cgrp);
 
-	if (cgroup_on_dfl(cgrp)) {
-		ret = psi_cgroup_alloc(cgrp);
-		if (ret)
-			goto out_idr_free;
-	}
-
 	cgroup_propagate_control(cgrp);
 
 	return cgrp;
 
+out_psi_free:
+	if (cgroup_on_dfl(cgrp))
+		psi_cgroup_free(cgrp);
 out_idr_free:
 	cgroup_idr_remove(&root->cgroup_idr, cgrp->id);
 out_cancel_ref:
