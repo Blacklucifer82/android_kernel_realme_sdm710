@@ -2,12 +2,10 @@ name: Build Trishula Kernel
 
 on:
   workflow_dispatch:
-    inputs:
-      publish_release:
-        description: "Publish GitHub release after successful build"
-        required: true
-        default: false
-        type: boolean
+
+  schedule:
+    # Every Sunday at 02:00 UTC / 07:30 IST
+    - cron: '0 2 * * 0'
 
 permissions:
   contents: write
@@ -19,6 +17,7 @@ concurrency:
 env:
   DEVICE_CODENAME: RMX1851
   KERNEL_NAME: Trishula
+
   KERNEL_DEFCONFIG: sdm670-perf_defconfig
   KERNEL_IMAGE: Image.gz-dtb
 
@@ -28,7 +27,9 @@ env:
   CROSS_COMPILE: aarch64-linux-gnu-
   CROSS_COMPILE_ARM32: arm-linux-gnueabi-
 
+  # LLVM 23.1.1
   LLVM_VERSION: 23.1.1
+  LLVM_ARCHIVE: llvm-23.1.1-x86_64.tar.xz
   LLVM_ARCHIVE_SHA256: 4511aee50112bf96d8f5108daa8bc1b99283fab51d37068758f91b9217940129
 
   KBUILD_BUILD_USER: Trishula
@@ -51,10 +52,36 @@ jobs:
           submodules: recursive
 
       # ------------------------------------------------------------
-      # Dependencies
+      # Update KernelSU submodule
+      # ------------------------------------------------------------
+      - name: Update KernelSU submodule
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "========================================"
+          echo "       UPDATE KERNELSU SUBMODULE"
+          echo "========================================"
+
+          git submodule sync KernelSU
+
+          git submodule update \
+            --init \
+            --remote \
+            KernelSU
+
+          echo
+          echo "KernelSU commit:"
+          git -C KernelSU log -1 --oneline
+
+      # ------------------------------------------------------------
+      # Install dependencies
       # ------------------------------------------------------------
       - name: Install build dependencies
+        shell: bash
         run: |
+          set -euo pipefail
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -63,8 +90,12 @@ jobs:
             build-essential \
             ccache \
             cpio \
+            device-tree-compiler \
             flex \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
             git \
+            git-lfs \
             libelf-dev \
             libncurses-dev \
             libssl-dev \
@@ -73,14 +104,12 @@ jobs:
             python-is-python3 \
             rsync \
             unzip \
-            zip \
+            wget \
             xz-utils \
-            curl \
-            binutils-aarch64-linux-gnu \
-            binutils-arm-linux-gnueabi
+            zip
 
       # ------------------------------------------------------------
-      # ccache
+      # Ccache
       # ------------------------------------------------------------
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
@@ -89,32 +118,38 @@ jobs:
           max-size: 10G
 
       # ------------------------------------------------------------
-      # LLVM 23.1.1
+      # Install LLVM 23.1.1
       # ------------------------------------------------------------
       - name: Install LLVM ${{ env.LLVM_VERSION }}
         shell: bash
         run: |
           set -euo pipefail
 
-          LLVM_ARCHIVE="llvm-${LLVM_VERSION}-x86_64.tar.xz"
+          echo "========================================"
+          echo "          LLVM ${LLVM_VERSION}"
+          echo "========================================"
+
           LLVM_URL="https://www.kernel.org/pub/tools/llvm/files/${LLVM_ARCHIVE}"
+
           LLVM_DIR="${RUNNER_TEMP}/llvm-${LLVM_VERSION}"
 
           mkdir -p "${LLVM_DIR}"
 
-          echo "Downloading ${LLVM_ARCHIVE}..."
+          echo
+          echo "Downloading:"
+          echo "${LLVM_URL}"
 
-          curl -fL \
-            --retry 5 \
-            --retry-delay 2 \
-            -o "${RUNNER_TEMP}/${LLVM_ARCHIVE}" \
-            "${LLVM_URL}"
+          wget -q --show-progress \
+            "${LLVM_URL}" \
+            -O "${RUNNER_TEMP}/${LLVM_ARCHIVE}"
 
-          echo "Verifying LLVM archive..."
+          echo
+          echo "Checking SHA256..."
 
           echo "${LLVM_ARCHIVE_SHA256}  ${RUNNER_TEMP}/${LLVM_ARCHIVE}" \
             | sha256sum -c -
 
+          echo
           echo "Extracting LLVM..."
 
           tar -xJf \
@@ -123,6 +158,8 @@ jobs:
             --strip-components=1
 
           echo "${LLVM_DIR}/bin" >> "${GITHUB_PATH}"
+
+          echo "LLVM_DIR=${LLVM_DIR}" >> "${GITHUB_ENV}"
 
           echo
           echo "Clang:"
@@ -142,63 +179,35 @@ jobs:
             | grep -F "LLD ${LLVM_VERSION}"
 
       # ------------------------------------------------------------
-      # Toolchain verification
+      # Configure LLVM environment
       # ------------------------------------------------------------
-      - name: Verify toolchain
+      - name: Configure LLVM environment
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "========================================"
-          echo "          TOOLCHAIN CHECK"
-          echo "========================================"
+          echo "LLVM_DIR=${LLVM_DIR}"
 
           echo
-          echo "clang:"
+          echo "Using clang:"
+          which clang
           clang --version
 
           echo
-          echo "ld.lld:"
+          echo "Using ld.lld:"
+          which ld.lld
           ld.lld --version
 
-          echo
-          echo "llvm-ar:"
-          llvm-ar --version | head -n 1
-
-          echo
-          echo "llvm-nm:"
-          llvm-nm --version | head -n 1
-
-          echo
-          echo "llvm-objcopy:"
-          llvm-objcopy --version | head -n 1
-
-          echo
-          echo "llvm-objdump:"
-          llvm-objdump --version | head -n 1
-
-          echo
-          echo "ARM64 linker:"
-          aarch64-linux-gnu-ld --version | head -n 1
-
-          echo
-          echo "ARM32 linker:"
-          arm-linux-gnueabi-ld --version | head -n 1
-
-          echo
-          echo "LLVM target support:"
-          clang -print-targets | grep -E 'aarch64|arm'
-
       # ------------------------------------------------------------
-      # Verify submodules
+      # Verify KernelSU
       # ------------------------------------------------------------
-      - name: Verify ReSukiSU and NoMount
+      - name: Verify KernelSU
         shell: bash
         run: |
           set -euo pipefail
 
           echo "========================================"
-          echo "          SUBMODULE CHECK"
+          echo "          KERNELSU CHECK"
           echo "========================================"
 
           echo
@@ -206,33 +215,33 @@ jobs:
           git submodule status --recursive
 
           echo
-          echo "Checking ReSukiSU..."
+          echo "Checking KernelSU..."
 
           test -d KernelSU
           test -f KernelSU/kernel/Kconfig
           test -f KernelSU/kernel/Makefile
 
-          echo "ReSukiSU commit:"
+          echo
+          echo "KernelSU commit:"
           git -C KernelSU log -1 --oneline
 
           echo
-          echo "Checking NoMount..."
-
-          test -d NoMount
-          git -C NoMount rev-parse HEAD
+          echo "KernelSU status:"
+          git -C KernelSU status --short
 
           echo
           echo "KernelSU symlink:"
           ls -l drivers/kernelsu
 
           test "$(readlink drivers/kernelsu)" = "../KernelSU/kernel"
+
           echo
-          echo "Submodule verification passed."
+          echo "KernelSU verification passed."
 
       # ------------------------------------------------------------
-      # Configure and build
+      # Build kernel
       # ------------------------------------------------------------
-      - name: Configure and build kernel
+      - name: Build kernel
         shell: bash
         run: |
           set -euo pipefail
@@ -242,46 +251,80 @@ jobs:
           rm -rf "${BUILD_OUTPUT}"
           mkdir -p "${BUILD_OUTPUT}"
 
-          echo
           echo "========================================"
           echo "          TRISHULA KERNEL"
           echo "========================================"
+
           echo
           echo "Device       : ${DEVICE_CODENAME}"
           echo "Defconfig    : ${KERNEL_DEFCONFIG}"
           echo "Kernel image : ${KERNEL_IMAGE}"
           echo "LLVM         : ${LLVM_VERSION}"
           echo "Architecture : ${ARCH}"
-          echo
 
+          export ARCH="${ARCH}"
+          export SUBARCH="${SUBARCH}"
+
+          export CROSS_COMPILE="${CROSS_COMPILE}"
+          export CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}"
+
+          # LLVM
+          export LLVM=1
+          export LLVM_IAS=1
+          export LD=ld.lld
+
+          # Kernel 4.9 compatibility
           export HOSTCFLAGS="-Wno-unused-command-line-argument"
+          export KCFLAGS="-fuse-ld=lld"
+
+          # ccache
+          export CC="ccache clang"
+          export HOSTCC="ccache gcc"
+
+          echo
+          echo "clang:"
+          which clang
+          clang --version
+
+          echo
+          echo "ld.lld:"
+          which ld.lld
+          ld.lld --version
 
           # --------------------------------------------------------
           # Defconfig
           # --------------------------------------------------------
+          echo
           echo "========================================"
-          echo "          DEFCONFIG"
+          echo "             DEFCONFIG"
           echo "========================================"
 
           make -C "${GITHUB_WORKSPACE}" \
             O="${BUILD_OUTPUT}" \
             ARCH="${ARCH}" \
-            LLVM=1 \
-            LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
             CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            HOSTCFLAGS="${HOSTCFLAGS}" \
             "${KERNEL_DEFCONFIG}"
 
           # --------------------------------------------------------
-          # Finalize configuration
+          # Olddefconfig
           # --------------------------------------------------------
+          echo
+          echo "========================================"
+          echo "           OLDDEFCONFIG"
+          echo "========================================"
+
           make -C "${GITHUB_WORKSPACE}" \
             O="${BUILD_OUTPUT}" \
             ARCH="${ARCH}" \
-            LLVM=1 \
-            LLVM_IAS=1 \
             CROSS_COMPILE="${CROSS_COMPILE}" \
             CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            HOSTCFLAGS="${HOSTCFLAGS}" \
             olddefconfig
 
           # --------------------------------------------------------
@@ -296,15 +339,16 @@ jobs:
             -j"$(nproc --all)" \
             O="${BUILD_OUTPUT}" \
             ARCH="${ARCH}" \
+            CROSS_COMPILE="${CROSS_COMPILE}" \
+            CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
             LLVM=1 \
             LLVM_IAS=1 \
             CC="ccache clang" \
-            CROSS_COMPILE="${CROSS_COMPILE}" \
-            CROSS_COMPILE_ARM32="${CROSS_COMPILE_ARM32}" \
-            KCFLAGS="-fuse-ld=lld"
+            HOSTCFLAGS="${HOSTCFLAGS}" \
+            KCFLAGS="${KCFLAGS}"
 
       # ------------------------------------------------------------
-      # Verify output
+      # Verify kernel
       # ------------------------------------------------------------
       - name: Verify kernel
         shell: bash
@@ -318,9 +362,6 @@ jobs:
           echo "========================================"
 
           test -s "${KERNEL_PATH}"
-          test -s out/vmlinux
-          test -s out/.config
-          test -s out/include/config/kernel.release
 
           echo
           echo "Kernel image:"
@@ -328,56 +369,20 @@ jobs:
 
           echo
           echo "vmlinux:"
+          test -s out/vmlinux
           ls -lh out/vmlinux
 
           echo
+          echo "Kernel config:"
+          test -s out/.config
+
+          echo
           echo "Kernel release:"
+          test -s out/include/config/kernel.release
           cat out/include/config/kernel.release
 
           echo
-          echo "Compiler:"
-          grep -aF "clang version ${LLVM_VERSION}" out/vmlinux
-
-          echo
           echo "Kernel verification passed."
-
-      # ------------------------------------------------------------
-      # Prepare artifacts
-      # ------------------------------------------------------------
-      - name: Prepare artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p artifacts
-
-          KERNEL_PATH="out/arch/arm64/boot/${KERNEL_IMAGE}"
-
-          cp "${KERNEL_PATH}" \
-            "artifacts/${KERNEL_NAME}-${DEVICE_CODENAME}-${KERNEL_IMAGE}"
-
-          cp out/.config \
-            artifacts/kernel.config
-
-          cp out/vmlinux \
-            artifacts/vmlinux
-
-          {
-            echo "Device: ${DEVICE_CODENAME}"
-            echo "Kernel: ${KERNEL_NAME}"
-            echo "Kernel image: ${KERNEL_IMAGE}"
-            echo "LLVM: ${LLVM_VERSION}"
-            echo "Defconfig: ${KERNEL_DEFCONFIG}"
-            echo
-            echo "ReSukiSU:"
-            git -C KernelSU rev-parse HEAD
-            echo
-            echo "NoMount:"
-            git -C NoMount rev-parse HEAD
-            echo
-            echo "Kernel:"
-            git rev-parse HEAD
-          } > artifacts/build-info.txt
 
       # ------------------------------------------------------------
       # Clone AnyKernel3
@@ -387,9 +392,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          git clone --depth 1 \
+          git clone \
+            --depth 1 \
             https://github.com/Blacklucifer82/AnyKernel3.git \
             "${RUNNER_TEMP}/AnyKernel3"
+
+          echo "ANYKERNEL=${RUNNER_TEMP}/AnyKernel3" >> "${GITHUB_ENV}"
 
       # ------------------------------------------------------------
       # Package AnyKernel3
@@ -405,12 +413,15 @@ jobs:
           test -s "${KERNEL_PATH}"
           test -f "${ANYKERNEL}/anykernel.sh"
 
-          # Put the exact kernel image expected by this AnyKernel3 tree
-          # in the ZIP root.
+          echo
+          echo "Copying kernel image..."
+
           cp "${KERNEL_PATH}" \
             "${ANYKERNEL}/${KERNEL_IMAGE}"
 
-          BUILD_DATE="$(date -u +%Y%m%d-%H%M)"
+          # Build date in IST
+          BUILD_DATE="$(TZ=Asia/Kolkata date +%Y%m%d-%H%M)"
+
           ZIP_NAME="${KERNEL_NAME}-${DEVICE_CODENAME}-clang${LLVM_VERSION}-${BUILD_DATE}.zip"
 
           cd "${ANYKERNEL}"
@@ -419,43 +430,30 @@ jobs:
             "${GITHUB_WORKSPACE}/${ZIP_NAME}" \
             . \
             -x '.git/*' \
+            -x '.github/*' \
             -x 'README.md'
 
           cd "${GITHUB_WORKSPACE}"
 
-          mv "${ZIP_NAME}" \
-            "artifacts/${ZIP_NAME}"
-
+          echo "BUILD_DATE=${BUILD_DATE}" >> "${GITHUB_ENV}"
           echo "ZIP_NAME=${ZIP_NAME}" >> "${GITHUB_ENV}"
 
           echo
-          echo "Flashable ZIP:"
-          ls -lh "artifacts/${ZIP_NAME}"
+          echo "========================================"
+          echo "          FLASHABLE ZIP"
+          echo "========================================"
 
-      # ------------------------------------------------------------
-      # Upload artifacts
-      # ------------------------------------------------------------
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Trishula-${{ env.DEVICE_CODENAME }}-clang${{ env.LLVM_VERSION }}
-          path: artifacts/*.zip
-          if-no-files-found: error
+          ls -lh "${ZIP_NAME}"
 
       # ------------------------------------------------------------
       # GitHub Release
       # ------------------------------------------------------------
       - name: Create GitHub Release
-        if: ${{ inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: Trishula-${{ env.DEVICE_CODENAME }}-${{ github.run_number }}
-          name: Trishula ${{ env.DEVICE_CODENAME }} Build ${{ github.run_number }}
+          tag_name: "Trishula-${{ env.DEVICE_CODENAME }}-${{ github.run_number }}"
+          name: "Trishula-${{ env.DEVICE_CODENAME }}-${{ github.run_number }}"
           generate_release_notes: true
-          files: |
-            artifacts/*.zip
-            artifacts/Trishula-${{ env.DEVICE_CODENAME }}-${{ env.KERNEL_IMAGE }}
-            artifacts/kernel.config
-            artifacts/build-info.txt
+          files: "${{ env.ZIP_NAME }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
