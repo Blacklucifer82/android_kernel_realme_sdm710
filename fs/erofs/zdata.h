@@ -9,6 +9,7 @@
 
 #include "internal.h"
 #include "zpvec.h"
+#include <linux/kthread.h>
 
 /*
  *  - 0x6A110C8D ('pallocated', Z_EROFS_MAPPING_PREALLOCATED) -
@@ -96,6 +97,9 @@ struct z_erofs_unzip_io {
 	union {
 		wait_queue_head_t wait;
 		struct work_struct work;
+#ifdef CONFIG_EROFS_FS_PCPU_KTHREAD
+		struct kthread_work kthread_work;
+#endif
 	} u;
 };
 
