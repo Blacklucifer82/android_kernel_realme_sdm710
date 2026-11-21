@@ -40,15 +40,13 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
-#ifdef VENDOR_EDIT //YiXue.Ge@PSW.kernel.drv 20170703 modify for enable lz4 default
-#ifdef CONFIG_CRYPTO_LZ4
+#ifdef CONFIG_CRYPTO_ZSTD
+static const char *default_compressor = "zstd";
+#elif defined(CONFIG_CRYPTO_LZ4)
 static const char *default_compressor = "lz4";
-#else /*CONFIG_ZRAM_LZ4_COMPRESS*/
+#else
 static const char *default_compressor = "lzo";
-#endif /*CONFIG_ZRAM_LZ4_COMPRESS*/
-#else /*VENDOR_EDIT*/
-static const char *default_compressor = "lzo";
-#endif/*VENDOR_EDIT*/
+#endif
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -1043,7 +1041,14 @@ static ssize_t comp_algorithm_store(struct device *dev,
 		return -EBUSY;
 	}
 
+#ifdef CONFIG_CRYPTO_ZSTD
+	if (!strcmp(compressor, "lz4") || !strcmp(compressor, "lzo"))
+		strcpy(zram->compressor, "zstd");
+	else
+		strcpy(zram->compressor, compressor);
+#else
 	strcpy(zram->compressor, compressor);
+#endif
 	up_write(&zram->init_lock);
 	return len;
 }
