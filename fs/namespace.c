@@ -1232,6 +1232,8 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 	int err;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	bool is_mnt_ksu_unshared = false;
+
 	/*
 	 * We stop checking for ksu processes once /sdcard/Android is accessible,
 	 * for the sake of performance.
@@ -1248,6 +1250,7 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 			if (flag & CL_COPY_MNT_NS) {
 				mnt = susfs_alloc_unshare_ksu_vfsmnt(old->mnt_devname,
 						old->mnt_id);
+				is_mnt_ksu_unshared = true;
 				goto bypass_orig_alloc;
 			}
 			/* else we just assign a fake mnt_id starting at DEFAULT_KSU_MNT_ID */
@@ -1296,10 +1299,8 @@ bypass_orig_alloc:
 	mnt->mnt.mnt_flags &= ~(MNT_WRITE_HOLD|MNT_MARKED|MNT_INTERNAL);
 
 #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-	if (static_branch_unlikely(&susfs_is_sdcard_android_data_not_decrypted)) {
-		if (susfs_is_current_ksu_domain() && (flag & CL_COPY_MNT_NS))
-			mnt->mnt.mnt_flags |= VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT;
-	}
+	if (unlikely(is_mnt_ksu_unshared))
+		mnt->mnt.mnt_flags |= VFSMOUNT_MNT_FLAGS_KSU_UNSHARED_MNT;
 #endif
 
 	/* Don't allow unprivileged users to change mount flags */
