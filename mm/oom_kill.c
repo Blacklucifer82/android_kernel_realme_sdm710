@@ -467,8 +467,7 @@ static bool __oom_reap_task_mm(struct mm_struct *mm)
 {
 	struct mmu_gather tlb;
 	struct vm_area_struct *vma;
-	struct zap_details details = {.check_swap_entries = true,
-				      .ignore_dirty = true};
+	struct zap_details details = { 0 };
 
 	/* Notifier callbacks can block with the 4.9 API. */
 	if (mm_has_notifiers(mm))

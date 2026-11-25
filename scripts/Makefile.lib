@@ -146,7 +146,7 @@ endif
 # of -Idir to -I$(srctree)/dir except for absolute paths (starting with '/').
 
 ifeq ($(KBUILD_SRC),)
-__c_flags	= $(_c_flags)
+__c_flags	= $(if $(src),-I$(src)) $(_c_flags)
 __a_flags	= $(_a_flags)
 __cpp_flags     = $(_cpp_flags)
 else
