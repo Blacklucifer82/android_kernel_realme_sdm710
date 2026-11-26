@@ -79,6 +79,7 @@ static struct kthread_worker *erofs_init_percpu_worker(int cpu)
 	{
 		struct sched_param param = { .sched_priority = 0 };
 		sched_setscheduler_nocheck(worker->task, SCHED_NORMAL, &param);
+		set_user_nice(worker->task, 0);
 	}
 #endif
 	return worker;
