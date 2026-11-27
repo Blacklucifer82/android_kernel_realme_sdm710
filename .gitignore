@@ -10,6 +10,9 @@
 # Normal rules
 #
 .*
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 *.o
 *.o.*
 *.a
@@ -123,3 +126,6 @@ kernel/configs/android-*.cfg
 #Ignoring Android.bp link file
 #
 Android.bp
+
+# Output directory
+out/
