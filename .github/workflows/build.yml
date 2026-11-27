@@ -3,10 +3,6 @@ name: Build Trishula Kernel
 on:
   workflow_dispatch:
 
-  schedule:
-    # Every Sunday at 02:00 UTC / 07:30 IST
-    - cron: '0 2 * * 0'
-
 permissions:
   contents: write
 
